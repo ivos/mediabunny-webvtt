@@ -3,6 +3,7 @@ import {
 	BufferTarget,
 	Mp4OutputFormat,
 	CanvasSource,
+	TextSubtitleSource,
 	AudioBufferSource,
 	QUALITY_HIGH,
 	getFirstEncodableAudioCodec,
@@ -124,7 +125,12 @@ const generateVideo = async () => {
 			alert('Your browser doesn\'t support audio encoding, so we won\'t include audio in the output file.');
 		}
 
+		const subtitleSource = new TextSubtitleSource('webvtt');
+		output.addSubtitleTrack(subtitleSource, { languageCode: 'eng' });
+
 		await output.start();
+
+		await subtitleSource.add('WEBVTT\n\n');
 
 		let currentFrame = 0;
 
@@ -141,6 +147,29 @@ const generateVideo = async () => {
 			}
 		}, 1000 / 60);
 
+		let subtitleStart = 0;
+		let subtitleEnded = false;
+		let subtitleCounter = 1;
+		const addSubtitle = async (currentTime: number) => {
+			if (currentTime > subtitleStart + 2) {
+				subtitleStart = currentTime;
+				subtitleEnded = false;
+				return;
+			}
+			if (currentTime > subtitleStart + 1 && !subtitleEnded) {
+				const format = (seconds: number) =>
+					new Date(1_000 * (seconds || 0))
+						.toISOString()
+						.substring(11, 11 + 12);
+				const text = `Subtitle ${subtitleCounter}.`;
+				const content = `${format(subtitleStart)} --> ${format(currentTime)}\n${text}\n\n`;
+				await subtitleSource.add(content);
+				console.log('procedural-generation.ts addSubtitle, added:', content);
+				subtitleCounter++;
+				subtitleEnded = true;
+			}
+		};
+
 		// Now, let's crank through all frames in a tight loop and render them as fast as possible
 		for (currentFrame; currentFrame < totalFrames; currentFrame++) {
 			const currentTime = currentFrame / frameRate;
@@ -151,6 +180,8 @@ const generateVideo = async () => {
 			// Add the current state of the canvas as a frame to the video. Using `await` here is crucial to
 			// automatically slow down the rendering loop when the encoder can't keep up.
 			await canvasSource.add(currentTime, 1 / frameRate);
+
+			await addSubtitle(currentTime);
 		}
 
 		// Signal to the output that no more video frames are coming (not necessary, but recommended)
@@ -163,6 +194,8 @@ const generateVideo = async () => {
 			await audioBufferSource.add(audioBuffer);
 			audioBufferSource.close();
 		}
+
+		subtitleSource.close();
 
 		clearInterval(progressInterval);
 
